@@ -42,12 +42,12 @@ class DNSAgentResolver(BaseResolver):
 
             if seq_num not in received_chunks:
                 received_chunks[seq_num] = plaintext
-                print(f"[✓] Received chunk {seq_num}: {plaintext}")
+                print(f"✅ Received chunk {seq_num}: {plaintext}")
             else:
-                print(f"[=] Duplicate chunk {seq_num} ignored.")
+                print(f"🔄 Duplicate chunk {seq_num} ignored.")
 
         except Exception as e:
-            print(f"[!] Error parsing query: {e}")
+            print(f"❗ Error parsing query: {e}")
 
         reply = request.reply()
         reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, rclass=1, ttl=60, rdata=A(RESPONSE_IP)))
@@ -58,14 +58,22 @@ def start_dns_server():
     server = DNSServer(resolver, port=5353, address="127.0.0.1", tcp=False)
     server.start_thread()
 
-    print(f" DNS Tunnel Server running on port 53...\nListening for data on domain: {DOMAIN}")
+    print(f"🔒 DNS Tunnel Server running on port 53...\nListening for data on domain: {DOMAIN}")
     try:
         while True:
             pass
     except KeyboardInterrupt:
-        print("\n Shutting down... rebuilding message:")
+        print(f"⚠️  Shutting down... rebuilding message:")
         message = b''.join([received_chunks[i] for i in sorted(received_chunks)])
-        print(f" Reconstructed message:\n{message.decode(errors='ignore')}")
+        print(f" ✅ Reconstructed message:\n    {message.decode(errors='ignore')}")
+    
+        expected = max(received_chunks.keys()) + 1
+        missing = set(range(expected)) - received_chunks.keys()
+        print(f"✅ Received chunks: {sorted(received_chunks.keys())}")
+        if missing:
+            print(f"⚠️ Missing chunks: {sorted(missing)}")
+        else:
+            print("✅ All chunks received successfully.")
 
 if __name__ == "__main__":
     start_dns_server()

