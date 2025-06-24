@@ -149,10 +149,10 @@ Stop the server (`Ctrl+C`). It will automatically reassemble and display the com
 
 > ## \--- Reconstructed Message --- This is a highly confidential message that will be tunneled over DNS.
 
+> ```
 > ✅ Received chunks: [0, 1, 2]
 > ✅ All chunks received successfully.
 >
-> ```
 > ```
 
 -----
