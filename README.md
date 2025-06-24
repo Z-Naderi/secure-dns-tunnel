@@ -1,35 +1,35 @@
 # Secure DNS Tunneling with Symmetric Encryption
 
-[cite_start]This project implements a secure and covert communication system where a client (Agent) sends encrypted data via DNS queries to a server[cite: 2, 3]. [cite_start]It demonstrates the use of symmetric cryptography (specifically AES-256 in GCM mode) to protect data during transit, effectively creating a DNS tunnel[cite: 3, 4, 25].
+This project implements a secure and covert communication system where a client (Agent) sends encrypted data via DNS queries to a server. It demonstrates the use of symmetric cryptography (specifically AES-256 in GCM mode) to protect data during transit, effectively creating a DNS tunnel.
 
 ## 🌟 Features
 
-* [cite_start]**Secure Communication**: Data is encrypted using AES-256 GCM before being sent over DNS, ensuring confidentiality and integrity[cite: 3, 4, 25].
-* [cite_start]**Covert Channel**: Utilizes DNS queries as a hidden communication channel, making it ideal for bypassing network restrictions where only DNS traffic is allowed[cite: 40, 41].
-* [cite_start]**Reliable Transmission**: Implements an acknowledgment mechanism so the Agent knows if the server received the data[cite: 13]. Retries for chunks are also implemented to ensure data delivery.
-* [cite_start]**Data Integrity**: AES-GCM provides authentication, verifying that the received data has not been tampered with[cite: 25].
-* [cite_start]**Chunking and Reassembly**: Large messages are split into smaller chunks [cite: 28][cite_start], sent individually [cite: 12][cite_start], and then reassembled at the server[cite: 19, 38].
-* [cite_start]**Sequence Numbering**: Each chunk includes a sequence number to ensure correct order and message validity[cite: 14].
+**Secure Communication**: Data is encrypted using AES-256 GCM before being sent over DNS, ensuring confidentiality and integrity.
+**Covert Channel**: Utilizes DNS queries as a hidden communication channel, making it ideal for bypassing network restrictions where only DNS traffic is allowed.
+**Reliable Transmission**: Implements an acknowledgment mechanism so the Agent knows if the server received the data. Retries for chunks are also implemented to ensure data delivery.
+**Data Integrity**: AES-GCM provides authentication, verifying that the received data has not been tampered with.
+**Chunking and Reassembly**: Large messages are split into smaller chunks, sent individually, and then reassembled at the server.
+**Sequence Numbering**: Each chunk includes a sequence number to ensure correct order and message validity.
 
 ## 🚀 How it Works
 
-[cite_start]The system operates with three main components[cite: 5]:
+The system operates with three main components:
 
-1.  [cite_start]**Agent (Client)**: Acts as the data sender[cite: 7]. [cite_start]It encrypts the data using a symmetric key (e.g., AES-256) [cite: 10][cite_start], encodes the encrypted chunks using Base32 or Base64 to fit into DNS labels [cite: 11][cite_start], and sends them as part of DNS A queries[cite: 12]. [cite_start]It also implements acknowledgment messages[cite: 13].
-2.  [cite_start]**Server (Receiver)**: A custom DNS server that listens for incoming DNS queries[cite: 16, 17]. [cite_start]It extracts data from the query subdomain [cite: 18][cite_start], decodes and decrypts each chunk using the symmetric key [cite: 18][cite_start], then reconstructs the original message[cite: 19].
-3.  [cite_start]**Crypto Module (Shared)**: This module is shared between the Server and Agent[cite: 22]. [cite_start]It uses AES (CBC or GCM) for encryption and decryption [cite: 23][cite_start], manages padding, IV/nonce generation, and cryptographic integrity[cite: 25]. [cite_start]The key is manually configured and pre-shared[cite: 24].
+1.  **Agent (Client)**: Acts as the data sender. It encrypts the data using a symmetric key (e.g., AES-256), encodes the encrypted chunks using Base32 or Base64 to fit into DNS labels, and sends them as part of DNS A queries. It also implements acknowledgment messages.
+2.  **Server (Receiver)**: A custom DNS server that listens for incoming DNS queries. It extracts data from the query subdomain, decodes and decrypts each chunk using the symmetric key, then reconstructs the original message.
+3.  **Crypto Module (Shared)**: This module is shared between the Server and Agent. It uses AES (CBC or GCM) for encryption and decryption, manages padding, IV/nonce generation, and cryptographic integrity. The key is manually configured and pre-shared.
 
-### [cite_start]Communication Flow [cite: 26]
+### Communication Flow
 
-1.  [cite_start]The `Agent` reads the data (e.g., a message or file)[cite: 27].
-2.  [cite_start]The data is divided into smaller chunks[cite: 28].
-3.  [cite_start]Each chunk is[cite: 29]:
-    * [cite_start]Encrypted with AES[cite: 32].
-    * [cite_start]Encoded with Base32[cite: 33].
-    * [cite_start]Sent as a DNS query[cite: 34].
-4.  [cite_start]The `Server` receives the DNS query[cite: 35].
-5.  [cite_start]It extracts the subdomain [cite: 36][cite_start], decodes and decrypts it[cite: 37].
-6.  [cite_start]The `Server` reconstructs the original data[cite: 38].
+1.  The `Agent` reads the data (e.g., a message or file).
+2.  The data is divided into smaller chunks.
+3.  Each chunk is:
+    * Encrypted with AES.
+    * Encoded with Base32.
+    * Sent as a DNS query.
+4.  The `Server` receives the DNS query.
+5.  It extracts the subdomain, decodes and decrypts it.
+6.  The `Server` reconstructs the original data.
 7.  Upon successful reception and decryption, the Server sends a DNS A record reply (`1.2.3.4`) as an acknowledgment.
 8.  The Agent waits for the acknowledgment. If not received within a timeout, it retries sending the chunk up to `MAX_RETRIES` (3 times).
 
