@@ -33,24 +33,27 @@ class DNSAgentResolver(BaseResolver):
 
             seq_num = int(seq_label[3:])
 
-            # When receiving a chunk that's older than expected, ignore it.
-            with seq_lock:
-                if seq_num < expected_seq:
-                    print(f"⏭ Client already moved on from chunk {seq_num}, ignoring and sending higher ACK")
-                    ack_ip = f"1.2.{expected_seq // 256}.{expected_seq % 256}"
-                    reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
-                    return reply
 
             # Simulate packet loss for chunk 5 (for testing)
 
+            # Handle reset request explicitly
             if seq_num == -1:
                 with seq_lock:
+                    print(f"🔄 Before reset: expected_seq={expected_seq}, received_chunks={received_chunks}")
                     received_chunks.clear()
                     expected_seq = 0
                     print("🔄 Server state reset by client.")
                 ack_ip = "1.2.0.0"
                 reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
                 return reply
+
+            # Ignore chunks older than expected_seq
+            with seq_lock:
+                if seq_num < expected_seq:
+                    print(f"⏭ Ignoring chunk {seq_num} as it is older than expected_seq={expected_seq}")
+                    ack_ip = f"1.2.{expected_seq // 256}.{expected_seq % 256}"
+                    reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
+                    return reply
 
             # Base32 decoding and decrypting the message
             encoded_data = ''.join(labels[1:-len(DOMAIN.split('.'))])
