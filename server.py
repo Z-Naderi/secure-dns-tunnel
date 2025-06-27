@@ -33,7 +33,6 @@ class DNSAgentResolver(BaseResolver):
 
             seq_num = int(seq_label[3:])
 
-
             # Simulate packet loss for chunk 5 (for testing)
 
             # Handle reset request explicitly
@@ -91,9 +90,9 @@ class DNSAgentResolver(BaseResolver):
 
             try:
                 decoded_str = plaintext.decode("utf-8", errors="ignore")
-                print(f"📦 Received {seq_num}: {decoded_str}")
+                print(f"📡 Received {seq_num}: {decoded_str}")
             except:
-                print(f"📦 Received {seq_num}: [binary data]")
+                print(f"📡 Received {seq_num}: [binary data]")
 
             # Send the ACK for the next expected sequence
             ack_ip = f"1.2.{expected_seq // 256}.{expected_seq % 256}"
@@ -116,7 +115,7 @@ def start_dns_server():
         while True:
             pass
     except KeyboardInterrupt:
-        print("⚠️ Shutting down...")
+        print("⚠️   Shutting down...")
         if received_chunks:
             try:
                 message = b''.join([received_chunks[i] for i in sorted(received_chunks.keys())])
@@ -125,13 +124,13 @@ def start_dns_server():
                 missing = set(range(expected)) - set(received_chunks.keys())
                 print(f"✅ Received chunks: {sorted(received_chunks.keys())}")
                 if missing:
-                    print(f"⚠️ Missing chunks: {sorted(missing)}")
+                    print(f"⚠️   Missing chunks: {sorted(missing)}")
                 else:
                     print("✅ All chunks received successfully.")
             except Exception as e:
                 print(f"❗ Error while reconstructing message: {e}")
         else:
-            print("⚠️ No chunks received. Nothing to reconstruct.")
+            print("⚠️   No chunks received. Nothing to reconstruct.")
 
 if __name__ == "__main__":
     start_dns_server()
