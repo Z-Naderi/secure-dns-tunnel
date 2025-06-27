@@ -80,7 +80,7 @@ The Agent splits data into small chunks, encrypts and encodes them, and then sen
 
     ```python
     # From agent.py
-    CHUNK_SIZE = 50 # Max size of data per chunk in bytes
+    CHUNK_SIZE = 108 # Max size of data per chunk in bytes
 
     def split_data(data: bytes, size: int):
         return [data[i:i+size] for i in range(0, len(data), size)]
