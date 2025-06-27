@@ -8,7 +8,7 @@ SHARED_KEY = b"0123456789ABCDEF0123456789ABCDEF"
 #print("🔑 Key SHA256 hash:", hashlib.sha256(SHARED_KEY).hexdigest())
 if len(SHARED_KEY) != 32:
     raise ValueError("🔐 SHARED_KEY must be exactly 32 bytes long for AES-256.")
-CHUNK_SIZE = 50
+CHUNK_SIZE = 108
 DOMAIN = "tunnel.example.com"
 TIMEOUT = 4
 
@@ -60,7 +60,7 @@ def send_chunk(seq, chunk, base):
             if parts[:2] == ['1', '2']:
                 ack_seq = int(parts[2]) * 256 + int(parts[3])
                 if ack_seq < base:
-                    print(f"⚠️ Ignoring stale ACK for already dropped chunk {ack_seq}")
+                    print(f"⚠️   Ignoring stale ACK for already dropped chunk {ack_seq}")
                     time.sleep(0.1)
                     continue
                 return ack_seq
@@ -90,7 +90,6 @@ def main():
     retransmit_count = {i: 0 for i in range(total_chunks)}
 
     while base < total_chunks:
-        # ارسال چانک‌ها
         while next_seq < base + cwnd and next_seq < total_chunks:
             print(f"📤 Sending chunk {next_seq}")
             in_flight[next_seq] = {
@@ -99,7 +98,6 @@ def main():
             }
             next_seq += 1
 
-        # بررسی timeout
         now = time.time()
         to_retransmit = []
         for seq in list(in_flight.keys()):
