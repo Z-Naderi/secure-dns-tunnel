@@ -281,7 +281,7 @@ All configuration is done via constants at the top of the respective Python file
 | :------------- | :----------------------------------------- | :------------------------------------------------------------------------------------------------------ | :------------------------------- |
 | **`SHARED_KEY`** | `agent.py`, `server.py`, `crypto_module.py` | The **32-byte (256-bit) symmetric key**. Must be identical across all files.                            | `b"0123456789ABCDEF0123456789ABCDEF"` |
 | **`DOMAIN`** | `agent.py`, `server.py`                    | The base domain for the DNS tunnel.                                                                     | `'tunnel.example.com'`           |
-| **`CHUNK_SIZE`** | `agent.py`                                 | Max size (in bytes) of raw data per chunk.                                                              | `50`                             |
+| **`CHUNK_SIZE`** | `agent.py`                                 | Max size (in bytes) of raw data per chunk.                                                              | `108`                             |
 | **`TIMEOUT`** | `agent.py`                                 | Timeout in seconds for DNS queries and retransmission detection.                                        | `4`                              |
 | **`SERVER_IP`** | `agent.py`, `server.py`                    | IP address for the DNS server to run on / connect to (e.g., `127.0.0.1` for local testing).             | `'127.0.0.1'`                    |
 | **`SERVER_PORT`**| `agent.py`, `server.py`                    | Port for the DNS server. **Note: Uses TCP.** | `5354`                           |
